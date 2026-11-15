@@ -2,7 +2,7 @@
 
 # Atlas Enterprise AI
 
-### Enterprise Knowledge Assistant with RAG, LangGraph, AWS Bedrock, and Automated AWS Deployment
+### Enterprise Knowledge Assistant with RAG, LangGraph, Pinecone, Groq, and AWS (Bedrock optional)
 
 **Document intelligence · Conversational memory · Guardrails · Human review · Observability · CI/CD**
 
@@ -14,18 +14,31 @@
 
 ## Overview
 
-**Atlas Enterprise AI** is a full-stack, educational enterprise knowledge assistant that answers natural-language questions over uploaded organizational documents using retrieval-augmented generation (RAG). It combines a FastAPI backend, LangGraph orchestration, Amazon Bedrock models, Pinecone vector search, and PostgreSQL-backed conversation history with an HTML/CSS/JavaScript interface.
+**Atlas Enterprise AI** is a full-stack, educational enterprise knowledge assistant that answers natural-language questions over uploaded organizational documents using retrieval-augmented generation (RAG). It combines a FastAPI backend, LangGraph orchestration, Pinecone vector search and hosted embeddings, Groq-hosted chat models, Amazon S3 document storage, and PostgreSQL-backed conversation history with an HTML/CSS/JavaScript interface. Amazon Bedrock is supported as an optional alternative model provider.
 
 The project demonstrates how to connect document ingestion, grounded question answering, safety checks, human-in-the-loop (HITL) review, operational auditing, and observability into one AI application. It also includes a deployment approach using **Docker, Amazon ECR, Amazon EC2, and GitHub Actions with a self-hosted runner**.
 
 > **Project status:** Teaching/reference implementation. It is **not production-secure as shipped**: the demo identity context is not a real authentication or authorization system, approval decisions do not automatically execute destructive operations, and production-grade availability and rollback controls must be added separately.
+
+### Model providers
+
+Embeddings and chat generation are pluggable and selected in `.env`:
+
+| Setting | Default | Alternative |
+| --- | --- | --- |
+| `EMBED_PROVIDER` | `pinecone` (Pinecone Inference, `llama-text-embed-v2`, 1,024 dimensions) | `bedrock` (Titan Text Embeddings V2) |
+| `CHAT_PROVIDER` | `groq` (`openai/gpt-oss-120b`) | `bedrock` (Nova Lite) |
+
+Amazon S3 is always used for document storage. The default providers need no Amazon Bedrock access, which is useful because new or Free Plan AWS accounts can have Bedrock invocation disabled (see [Troubleshooting](#troubleshooting)).
+
+> Vectors from different embedding models are not interchangeable. If you change `EMBED_PROVIDER` or the embedding model, use a new Pinecone index name and re-upload your documents.
 
 ## Key Features
 
 | Capability | Description |
 | --- | --- |
 | Document ingestion | Browser uploads files directly to private Amazon S3 using presigned URLs; the backend processes and indexes them. |
-| Enterprise RAG | Retrieve relevant chunks from Pinecone and generate grounded answers using Amazon Bedrock. |
+| Enterprise RAG | Retrieve relevant chunks from Pinecone and generate grounded answers using Groq (or Amazon Bedrock). |
 | LangGraph workflow | Coordinate retrieval, generation, guardrail checks, and conversational context. |
 | Conversation memory | Persist chat turns in PostgreSQL and reuse recent history for follow-up questions. |
 | Guardrails | Apply deterministic input/output checks; behavior depends on the implemented rules. |
@@ -42,8 +55,8 @@ The project demonstrates how to connect document ingestion, grounded question an
 | Backend | Python, FastAPI, Uvicorn | APIs and application server |
 | Frontend | HTML, CSS, JavaScript | Browser-based user interface |
 | Orchestration | LangGraph | Stateful RAG workflow |
-| LLM | Amazon Bedrock — Nova Lite | Response generation |
-| Embeddings | Amazon Bedrock — Titan Text Embeddings V2 | Document and query vectors (1,024 dimensions in this project) |
+| LLM | Groq — `openai/gpt-oss-120b` (default); Amazon Bedrock Nova Lite (optional) | Response generation |
+| Embeddings | Pinecone Inference — `llama-text-embed-v2` (default); Amazon Bedrock Titan Text Embeddings V2 (optional) | Document and query vectors (1,024 dimensions in this project) |
 | Vector database | Pinecone | Semantic retrieval and document chunk indexing |
 | Object storage | Amazon S3 | Original uploaded documents |
 | Relational database | PostgreSQL on Render | Document metadata, conversations, approvals, feedback, audit |
@@ -65,7 +78,7 @@ flowchart TD
     U -->|Upload complete| API
     API --> ING[Document ingestion]
     ING -->|Read file| S3
-    ING -->|Create embeddings| TITAN[Bedrock Titan Embeddings V2]
+    ING -->|Create embeddings| EMB[Pinecone Inference embeddings]
     ING -->|Upsert vectors| PC[Pinecone]
     ING --> DB[(Render PostgreSQL)]
 
@@ -73,7 +86,7 @@ flowchart TD
     API --> GR[LangGraph RAG + guardrails]
     GR -->|Conversation history| DB
     GR -->|Vector retrieval| PC
-    GR -->|Generate answer| NOVA[Bedrock Nova Lite]
+    GR -->|Generate answer| LLM[Groq chat model]
     GR -->|Answer + sources| API
     API --> U
     API -->|Approvals, feedback, audit| DB
@@ -95,7 +108,7 @@ flowchart LR
     GA -->|Deployment job| RUNNER[Self-hosted GitHub runner on EC2]
     RUNNER -->|Stop old / run new container| EC2
     EC2 --> DOCKER[Docker container: FastAPI + UI]
-    DOCKER --> SERVICES[Bedrock · S3 · Pinecone · PostgreSQL · Rius]
+    DOCKER --> SERVICES[S3 · Pinecone · Groq · PostgreSQL · Rius]
 ```
 
 **Deployment flow:** A commit to `main` triggers GitHub Actions. The CI job runs configured checks; the delivery job builds and pushes an image tagged with the Git commit SHA to ECR. The deployment job runs on the trusted EC2 self-hosted runner, pulls that image, and replaces the application container. The instance needs outbound access to the external services.
@@ -109,7 +122,7 @@ flowchart LR
 │   ├── graph.py                # LangGraph workflow
 │   ├── rag.py                  # RAG integration
 │   ├── vector.py               # Pinecone operations
-│   ├── aws.py                  # AWS clients
+│   ├── aws.py                  # S3 client, embeddings, and chat model calls
 │   ├── db.py                   # PostgreSQL access and audit
 │   ├── memory.py               # Conversation persistence
 │   ├── guardrails.py           # Input/output safety checks
@@ -136,8 +149,9 @@ flowchart LR
 
 - Python 3.11+ and pip (use the version compatible with your dependencies)
 - Docker Desktop or Docker Engine for container testing
-- AWS account with access to S3 and the required Amazon Bedrock models
-- Pinecone account and API key
+- AWS account with a private S3 bucket (Amazon Bedrock model access is needed only if you choose the Bedrock providers)
+- Groq account and API key (for the default chat provider)
+- Pinecone account and API key (vector index and hosted embeddings)
 - PostgreSQL database (the project uses Render)
 - Optional GlassFlow Rius account
 - For deployment: ECR repository, EC2 Linux instance, GitHub repository, and a registered self-hosted GitHub Actions runner
@@ -147,11 +161,9 @@ flowchart LR
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
-cd YOUR_REPOSITORY
+git clone https://github.com/Alancodess/ARIADNE-Enterprise-AI.git
+cd ARIADNE-Enterprise-AI
 ```
-
-Replace the placeholders with your actual repository URL and folder name.
 
 ### 2. Create a virtual environment
 
@@ -182,14 +194,27 @@ python -m pip install -r requirements.txt
 Copy `.env.example` to `.env`, then update the values for your environment:
 
 ```dotenv
-AWS_REGION=us-east-1
+# Must be the region your S3 bucket was created in (for example eu-north-1)
+AWS_REGION=eu-north-1
 S3_BUCKET=your-private-document-bucket
+# Local development only; on EC2 use an IAM role instead
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+
+# Model providers: pinecone|bedrock for embeddings, groq|bedrock for chat
+EMBED_PROVIDER=pinecone
+PINECONE_EMBED_MODEL=llama-text-embed-v2
+EMBED_DIM=1024
+CHAT_PROVIDER=groq
+GROQ_API_KEY=your-groq-key
+GROQ_MODEL=openai/gpt-oss-120b
+
+# Only used when a provider is set to bedrock
 BEDROCK_EMBED_MODEL=amazon.titan-embed-text-v2:0
 BEDROCK_CHAT_MODEL=amazon.nova-lite-v1:0
-EMBED_DIM=1024
 
 PINECONE_API_KEY=your-pinecone-key
-PINECONE_INDEX_NAME=atlas-rag-index
+PINECONE_INDEX_NAME=ariadne-enterprise-ai-index
 PINECONE_CLOUD=aws
 PINECONE_REGION=us-east-1
 
@@ -199,10 +224,17 @@ HITL_ENABLED=true
 MEMORY_TURNS=6
 
 RIUS_API_KEY=
-RIUS_SERVICE_NAME=atlas-enterprise-ai
+RIUS_SERVICE_NAME=ariadne-enterprise-ai
 RIUS_DISABLED=false
 RIUS_CAPTURE_CONTENT=false
 ```
+
+Important configuration notes:
+
+- **`AWS_REGION` must match the S3 bucket's region.** A mismatch makes the presigned upload fail with an HTTP 400 from S3.
+- Write values without quotes or spaces around `=`, and restart Uvicorn after editing `.env` (settings are cached).
+- Chat model names change over time. If Groq returns a model error, set `GROQ_MODEL` to a currently supported model from Groq's documentation; no code change is needed.
+- The Pinecone index is created automatically on first use if it does not exist. Plans can restrict the available regions; if creation fails with a region or plan error, use a region your plan supports.
 
 For local AWS access, use an appropriate AWS credential provider (for example, an AWS profile or environment credentials). **On EC2, prefer an IAM instance role** and do not put long-lived AWS keys into Docker images or GitHub secrets.
 
@@ -243,7 +275,7 @@ Because the browser uploads directly to S3, add the actual frontend origin to yo
 ]
 ```
 
-For cloud deployment, replace or supplement these with your exact deployed HTTPS origin. Keep the S3 bucket private.
+For cloud deployment, replace or supplement these with your exact deployed HTTPS origin. Keep the S3 bucket private. Presigned upload URLs are signed for `AWS_REGION`, so that setting must match the bucket's region.
 
 ## Run with Docker
 
@@ -270,7 +302,7 @@ This repository's intended deployment pattern uses **GitHub Actions + Amazon ECR
 
 1. **ECR:** Create a private repository named `atlas-enterprise-ai` (or choose your own name).
 2. **EC2:** Launch a Linux instance with Docker, AWS CLI, and a GitHub Actions self-hosted runner. Restrict network access and protect the runner.
-3. **EC2 IAM role:** Grant the permissions required to pull ECR images and invoke the application services (Bedrock and the specific S3 bucket). Avoid permanent access keys on the instance.
+3. **EC2 IAM role:** Grant the permissions required to pull ECR images and access the specific S3 bucket (plus Bedrock, if you use the Bedrock providers). Avoid permanent access keys on the instance.
 4. **GitHub IAM role:** Configure GitHub Actions OIDC for temporary credentials, with permissions to push to the target ECR repository and a trust policy restricted to your repository/branch.
 5. **Runtime configuration:** Store the application environment securely on EC2 (for a basic demo, `/opt/atlas/.env` with restrictive permissions; prefer a managed secret store in production).
 
@@ -382,9 +414,12 @@ This project intentionally prioritizes understandable implementation over produc
 | Symptom | Check |
 | --- | --- |
 | Browser upload says “Failed to fetch” | S3 CORS, correct frontend origin, presigned URL, bucket permissions |
+| Browser upload says “S3 upload failed” (HTTP 400) | `AWS_REGION` does not match the bucket's region; confirm in the S3 console and restart Uvicorn |
+| “Ingestion failed” after a successful upload | Read the traceback in the Uvicorn terminal; the failing step is usually embeddings, Pinecone, or credentials |
 | `No module named app` | Run commands from the repository root using `python -m uvicorn app.main:app` |
-| Pinecone indexing fails | API key, index region, 1,024-dimension configuration, quota |
-| Bedrock request fails | Model availability, region, IAM permissions, model IDs |
+| Pinecone indexing fails | API key, `PINECONE_INDEX_NAME`, index region and plan, 1,024-dimension configuration (an existing index with another dimension is rejected), quota |
+| Bedrock request fails | Only relevant with the Bedrock providers: model availability, region, IAM permissions, model IDs. `ValidationException: Operation not allowed` on every model, even in the console, indicates an account-level restriction (common on new or Free Plan accounts); open an AWS Support “Account and billing” case, or use the default providers |
+| Chat fails with a Groq error | `GROQ_API_KEY` is set; the model in `GROQ_MODEL` has not been deprecated (the error text includes Groq's message) |
 | Database connection fails | Render external URL, TLS setting, credentials, network access |
 | GitHub OIDC authentication fails | IAM trust policy, repository name, branch, audience |
 | ECR pull fails on EC2 | Instance IAM role, ECR permissions, region, Docker login |
@@ -413,7 +448,7 @@ Issues and pull requests are welcome where enabled. For substantial changes, des
 
 ## License
 
-**License not yet specified.** Add a `LICENSE` file and update this section if you intend to release the repository under an open-source license.
+Released under the **Apache License 2.0**. See the [`LICENSE`](LICENSE) file.
 
 ---
 
