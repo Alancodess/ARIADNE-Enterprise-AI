@@ -21,7 +21,12 @@ class Settings(BaseSettings):
     min_relevance: float = 0.25
     hitl_enabled: bool = True
     memory_turns: int = 6
-
+    embed_provider: str = "pinecone"
+    chat_provider: str = "groq"
+    pinecone_embed_model: str = "llama-text-embed-v2"
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_base_url: str = "https://api.groq.com/openai/v1"
 
 @lru_cache
 def settings() -> Settings:
