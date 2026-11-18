@@ -4,7 +4,7 @@
 
 ### Enterprise Knowledge Assistant with RAG, LangGraph, Pinecone, Groq, and AWS (Bedrock optional)
 
-**Document intelligence · Conversational memory · Guardrails · Human review · Observability · CI/CD**
+**Document intelligence · Conversational memory · Guardrails · Human review · Observability · CI/CD** 
 
 [Overview](#overview) · [Architecture](#architecture) · [Quick Start](#quick-start) · [CI/CD Deployment](#cicd-deployment-to-aws) · [API](#api-reference) · [Security](#security-and-production-readiness)
 
